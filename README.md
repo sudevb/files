@@ -1,156 +1,81 @@
-@Service
-public class DeltaSensitivityMapper {
+import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.Map;
 
-    @Autowired
-    private FRateService fRateService;
+public class MapAggregator {
 
-    public List<SensitivityDto> modelsToDtos(List<Trade> tradeList) {
-        return tradeList.parallelStream() // Using parallelStream for better performance
-                .flatMap(trade -> processTrade(trade, tradeList).stream())
-                .toList();
+    public static void main(String[] args) {
+        // Example input maps
+        Map<String, Map<String, BigDecimal>> t69Map = new HashMap<>();
+        Map<String, Map<String, BigDecimal>> mtsMap = new HashMap<>();
+
+        // Populate maps with example data
+        t69Map.put("USD", new HashMap<>(Map.of(
+                "PROP", BigDecimal.valueOf(100),
+                "CMGG", BigDecimal.valueOf(200)
+        )));
+        t69Map.put("JPY", new HashMap<>(Map.of(
+                "PROP", BigDecimal.valueOf(150),
+                "CMGG", BigDecimal.valueOf(250)
+        )));
+
+        mtsMap.put("USD", new HashMap<>(Map.of(
+                "MTD", BigDecimal.valueOf(50),
+                "FTD", BigDecimal.valueOf(30),
+                "FVA", BigDecimal.valueOf(20)
+        )));
+        mtsMap.put("JPY", new HashMap<>(Map.of(
+                "MTD", BigDecimal.valueOf(60),
+                "FTD", BigDecimal.valueOf(40),
+                "FVA", BigDecimal.valueOf(25)
+        )));
+
+        // Perform the aggregation and get the residual maps
+        Map<String, BigDecimal> propResidual = new HashMap<>();
+        Map<String, BigDecimal> cmggResidual = new HashMap<>();
+        aggregateMaps(t69Map, mtsMap, propResidual, cmggResidual);
+
+        // Print the resulting t69Map
+        System.out.println("Updated t69Map:");
+        t69Map.forEach((currency, innerMap) -> {
+            System.out.println("Currency: " + currency);
+            innerMap.forEach((key, value) -> System.out.println("  Key: " + key + ", Value: " + value));
+        });
+
+        // Print the residual maps
+        System.out.println("\nProp Residual:");
+        propResidual.forEach((currency, value) -> System.out.println("Currency: " + currency + ", Value: " + value));
+
+        System.out.println("\nCMGG Residual:");
+        cmggResidual.forEach((currency, value) -> System.out.println("Currency: " + currency + ", Value: " + value));
     }
 
-    private List<SensitivityDto> processTrade(Trade trade, List<Trade> tradeList) {
-        LocalDate maturityDate = trade.getMaturityDate().toLocalDate();
-        LocalDate asOfDate = trade.getAsOfDate().toLocalDate();
+    public static void aggregateMaps(Map<String, Map<String, BigDecimal>> t69Map, Map<String, Map<String, BigDecimal>> mtsMap,
+                                     Map<String, BigDecimal> propResidual, Map<String, BigDecimal> cmggResidual) {
+        mtsMap.forEach((currency, mtsInnerMap) -> {
+            // Retrieve or initialize the inner map for the currency in t69Map
+            t69Map.putIfAbsent(currency, new HashMap<>());
+            Map<String, BigDecimal> t69InnerMap = t69Map.get(currency);
 
-        if (trade.getFxProductInfo() instanceof FXLinear fLinear) {
-            Period tradeDuration = Period.between(asOfDate, maturityDate);
+            // Sum MTD and FTD from mtsMap
+            BigDecimal mtdValue = mtsInnerMap.getOrDefault("MTD", BigDecimal.ZERO);
+            BigDecimal ftdValue = mtsInnerMap.getOrDefault("FTD", BigDecimal.ZERO);
+            BigDecimal mtdFtdSum = mtdValue.add(ftdValue);
 
-            if (!tradeDuration.isNegative()) {
-                if (isTradeMtmInvalid(fLinear)) {
-                    Pair<FXLinear, Boolean> result = checkPartialTrade(fLinear, tradeList);
-                    trade.setFxProductInfo(result.getLeft());
-                    if (result.getRight()) {
-                        return mapTradeToFxDelta(trade);
-                    }
-                } else {
-                    return mapTradeToFxDelta(trade);
-                }
-            }
-        }
-        return List.of();
-    }
+            // Add the sum to t69Map for key "PROP"
+            BigDecimal updatedProp = t69InnerMap.getOrDefault("PROP", BigDecimal.ZERO).add(mtdFtdSum);
+            t69InnerMap.put("PROP", updatedProp);
 
-    private boolean isTradeMtmInvalid(FXLinear fLinear) {
-        return Objects.isNull(fLinear.getTradeMtm()) || Objects.equals(fLinear.getTradeMtm(), BigDecimal.ZERO);
-    }
+            // Update propResidual map
+            propResidual.put(currency, mtdFtdSum);
 
-    private List<SensitivityDto> mapTradeToFxDelta(Trade trade) {
-        List<SensitivityDto> sensitivityDtos = new ArrayList<>();
-        if (isEligibleForDeltaAandB(trade)) {
-            sensitivityDtos.add(toFxDeltaA(trade));
-            sensitivityDtos.add(toFxDeltaB(trade));
-        }
-        sensitivityDtos.add(toFxDeltaFX(trade));
-        return sensitivityDtos;
-    }
+            // Add FVA to t69Map for key "CMGG"
+            BigDecimal fvaValue = mtsInnerMap.getOrDefault("FVA", BigDecimal.ZERO);
+            BigDecimal updatedCmgg = t69InnerMap.getOrDefault("CMGG", BigDecimal.ZERO).add(fvaValue);
+            t69InnerMap.put("CMGG", updatedCmgg);
 
-    private boolean isEligibleForDeltaAandB(Trade trade) {
-        String tradeId = trade.getTradeId();
-        return !tradeId.contains("T069") && tradeId.contains("MTS");
-    }
-
-    private SensitivityDto toFxDeltaA(Trade trade) {
-        return createDeltaSensitivity(trade, DeltaType.DELTA_A);
-    }
-
-    private SensitivityDto toFxDeltaB(Trade trade) {
-        return createDeltaSensitivity(trade, DeltaType.DELTA_B);
-    }
-
-    private SensitivityDto toFxDeltaFX(Trade trade) {
-        return createDeltaSensitivity(trade, DeltaType.DELTA_FX);
-    }
-
-    private SensitivityDto createDeltaSensitivity(Trade trade, DeltaType deltaType) {
-        FXLinear fLinear = (FXLinear) trade.getFxProductInfo();
-        LocalDate maturityDate = trade.getMaturityDate().toLocalDate();
-        LocalDate asOfDate = trade.getAsOfDate().toLocalDate();
-
-        SensitivityDto dto = new SensitivityDto();
-        dto.setAsOfDate(asOfDate.toString());
-        dto.setTradeId(trade.getTradeId());
-        dto.setSensitivityName(deltaType.getName());
-        dto.setRiskClass(deltaType.getRiskClass());
-
-        // Shared logic for DV01 calculation
-        double dv01 = calculateDv01(fLinear, asOfDate, maturityDate, deltaType);
-        dto.setValues(List.of(BigDecimal.valueOf(dv01)));
-
-        // Risk factor setup
-        String riskFactor = getRiskFactor(fLinear, deltaType);
-        dto.setRiskFactor(riskFactor);
-
-        dto.setTenorLabels(List.of(maturityDate.toString()));
-        dto.setTenorDates(List.of(maturityDate.toString()));
-        dto.setValueCurrency(getValueCurrency(fLinear, deltaType));
-
-        return dto;
-    }
-
-    private double calculateDv01(FXLinear fLinear, LocalDate asOfDate, LocalDate maturityDate, DeltaType deltaType) {
-        double usdDf = Math.abs(fLinear.getTradeMtm().doubleValue() / (getFvNonUsd(fLinear) - fLinear.getBuyNotional().doubleValue()));
-        long numDays = asOfDate.until(maturityDate, ChronoUnit.DAYS);
-        double timeFrac = (double) numDays / 365.0;
-        return -timeFrac * fLinear.getBuyNotional().doubleValue() * usdDf / 10000.0;
-    }
-
-    private double getFvNonUsd(FXLinear fLinear) {
-        return fLinear.getSellNotional().doubleValue() / fLinear.getRevalRate();
-    }
-
-    private String getRiskFactor(FXLinear fLinear, DeltaType deltaType) {
-        return switch (deltaType) {
-            case DELTA_A -> fLinear.getBuyCurrency() + "_CURVE_A";
-            case DELTA_B -> fLinear.getSellCurrency() + "_CURVE_B";
-            case DELTA_FX -> fLinear.getSellCurrency() + "_CURVE_FX";
-        };
-    }
-
-    private String getValueCurrency(FXLinear fLinear, DeltaType deltaType) {
-        return deltaType == DeltaType.DELTA_FX ? fLinear.getSellCurrency() : fLinear.getBuyCurrency();
-    }
-
-    private Pair<FXLinear, Boolean> checkPartialTrade(FXLinear fLinear, List<Trade> tradeList) {
-        String[] parts = fLinear.getTradeId().split("_");
-        if (parts.length < 2) {
-            return Pair.of(fLinear, Boolean.FALSE);
-        }
-        String tradeId = parts[1];
-        return tradeList.stream()
-                .filter(trade -> trade.getTradeId().equalsIgnoreCase(tradeId))
-                .findFirst()
-                .map(matchedTrade -> {
-                    if (matchedTrade.getFxProductInfo() instanceof FXLinear matchedFxLinear) {
-                        fLinear.setTradeMtm(matchedFxLinear.getTradeMtm());
-                        return Pair.of(fLinear, Boolean.TRUE);
-                    }
-                    return Pair.of(fLinear, Boolean.FALSE);
-                })
-                .orElse(Pair.of(fLinear, Boolean.FALSE));
-    }
-
-    // Enum for delta types to differentiate specific behavior
-    private enum DeltaType {
-        DELTA_A("Delta A", "Interest Rate"),
-        DELTA_B("Delta B", "Interest Rate"),
-        DELTA_FX("Delta FX", "FX");
-
-        private final String name;
-        private final String riskClass;
-
-        DeltaType(String name, String riskClass) {
-            this.name = name;
-            this.riskClass = riskClass;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public String getRiskClass() {
-            return riskClass;
-        }
+            // Update cmggResidual map
+            cmggResidual.put(currency, fvaValue);
+        });
     }
 }
