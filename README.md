@@ -1,3 +1,16 @@
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class RtorDto {
+    private String tradeId;
+    private String bucket;
+    private String currency;
+    private BigDecimal delta;
+}
+
+
+
+
 @Service
 public class SensitivityService {
 
@@ -11,85 +24,95 @@ public class SensitivityService {
     private DfsPlValueRepository plValueRepo;
 
     public List<TradeDelta> calculateDeltas(LocalDate asOfDate) {
-        List<TradeDelta> result = new ArrayList<>();
+        // Step 1: Create the RTOR equivalent
+        List<RtorDto> rtorList = createRtor(asOfDate);
 
-        // Fetch sensitivity data
-        List<DfsOptionSensitivity> sensitivities = sensitivityRepo.findByAsOfDate(asOfDate);
+        // Step 2: Calculate the final delta values
+        List<TradeDelta> result = calculateFinalDeltas(rtorList, asOfDate);
 
-        // Step 1: Process `rtor` equivalent
-        Map<String, BigDecimal> bucketDeltas = new HashMap<>();
+        return result;
+    }
+
+    private List<RtorDto> createRtor(LocalDate asOfDate) {
+        List<DfsOptionSensitivity> sensitivities = sensitivityRepo.findByAsOfDateAndUnderlyingPattern(asOfDate, "__/JPY-SPOT");
+
+        Map<String, RtorDto> rtorMap = new HashMap<>();
         for (DfsOptionSensitivity sensitivity : sensitivities) {
             String bucket = sensitivity.getUnderlying().equals("USD/JPY-SPOT") ? "JPY" : sensitivity.getUnderlying().substring(0, 3);
-            bucketDeltas.merge(bucket, sensitivity.getDelta(), BigDecimal::add);
+            String key = sensitivity.getPsTradeId() + "|" + bucket + "|" + sensitivity.getCurrency();
+
+            rtorMap.compute(key, (k, v) -> {
+                if (v == null) {
+                    return new RtorDto(sensitivity.getPsTradeId(), bucket, sensitivity.getCurrency(), sensitivity.getDelta());
+                }
+                v.setDelta(v.getDelta().add(sensitivity.getDelta()));
+                return v;
+            });
         }
 
-        // Step 2: Calculate delta for buckets excluding JPY
-        for (Map.Entry<String, BigDecimal> entry : bucketDeltas.entrySet()) {
-            String bucket = entry.getKey();
-            BigDecimal delta = entry.getValue();
+        return new ArrayList<>(rtorMap.values());
+    }
 
-            if (!"JPY".equals(bucket)) {
-                // Handle special currencies for base_ccy and counter_ccy
-                String baseCcy = isSpecialCurrency(bucket) ? bucket : "USD";
-                String counterCcy = isSpecialCurrency(bucket) ? "USD" : bucket;
+    private List<TradeDelta> calculateFinalDeltas(List<RtorDto> rtorList, LocalDate asOfDate) {
+        List<TradeDelta> result = new ArrayList<>();
+
+        for (RtorDto rtor : rtorList) {
+            if (!"JPY".equals(rtor.getBucket())) {
+                // Handle special currencies
+                String baseCcy = isSpecialCurrency(rtor.getBucket()) ? rtor.getBucket() : "USD";
+                String counterCcy = isSpecialCurrency(rtor.getBucket()) ? "USD" : rtor.getBucket();
 
                 FxRate fxRate = fxRateRepo.findRate(asOfDate, baseCcy, counterCcy)
-                        .orElseThrow(() -> new RuntimeException("FX rate not found for bucket: " + bucket));
+                        .orElseThrow(() -> new RuntimeException("FX rate not found for bucket: " + rtor.getBucket()));
+
                 BigDecimal rate = fxRate.getRate();
                 BigDecimal directionFactor = "N".equals(fxRate.getDirection()) ? BigDecimal.ONE : BigDecimal.ZERO;
 
-                BigDecimal adjustedDelta = delta.multiply(rate).multiply(
+                BigDecimal adjustedDelta = rtor.getDelta().multiply(rate).multiply(
                         directionFactor.subtract(
                                 BigDecimal.ONE.subtract(directionFactor)
                                         .multiply(BigDecimal.ONE.divide(rate, 10, RoundingMode.HALF_UP).pow(2))
                         )
                 );
-                result.add(new TradeDelta(null, bucket, adjustedDelta));
+                result.add(new TradeDelta(rtor.getTradeId(), rtor.getBucket(), adjustedDelta));
             }
         }
 
-        // Step 3: Process for JPY
+        // Process JPY bucket
         FxRate jpyRate = fxRateRepo.findRate(asOfDate, "USD", "JPY")
                 .orElseThrow(() -> new RuntimeException("FX rate not found for JPY"));
+
         BigDecimal jpyRateValue = jpyRate.getRate();
         BigDecimal jpyDirectionFactor = "N".equals(jpyRate.getDirection()) ? BigDecimal.ONE : BigDecimal.ZERO;
 
-        BigDecimal jpyDelta = bucketDeltas.getOrDefault("JPY", BigDecimal.ZERO).multiply(
-                jpyDirectionFactor.add(
-                        BigDecimal.ONE.subtract(jpyDirectionFactor)
-                                .divide(jpyRateValue, 10, RoundingMode.HALF_UP)
-                )
-        );
-
-        result.add(new TradeDelta(null, "JPY", jpyDelta));
-
-        // Step 4: Process present values from `dfsplvalue`
-        List<DfsPlValue> plValues = plValueRepo.findByAsOfDateAndCurrencyNot(asOfDate, "USD");
-        for (DfsPlValue plValue : plValues) {
-            // Handle special currencies for base_ccy and counter_ccy
-            String baseCcy = isSpecialCurrency(plValue.getCurrency()) ? plValue.getCurrency() : "USD";
-            String counterCcy = isSpecialCurrency(plValue.getCurrency()) ? "USD" : plValue.getCurrency();
-
-            FxRate fxRate = fxRateRepo.findRate(asOfDate, baseCcy, counterCcy)
-                    .orElseThrow(() -> new RuntimeException("FX rate not found for currency: " + plValue.getCurrency()));
-
-            BigDecimal rate = fxRate.getRate();
-            BigDecimal directionFactor = "N".equals(fxRate.getDirection()) ? BigDecimal.ONE : BigDecimal.ZERO;
-
-            BigDecimal adjustedDelta = plValue.getPresentValue().multiply(
-                    directionFactor.equals(BigDecimal.ZERO) ? BigDecimal.ONE.negate()
-                            .multiply(BigDecimal.ONE.divide(rate, 10, RoundingMode.HALF_UP).pow(2))
-                            : BigDecimal.ONE
-            );
-
-            result.add(new TradeDelta(plValue.getPsTradeId(), plValue.getCurrency(), adjustedDelta));
+        for (RtorDto rtor : rtorList) {
+            if ("JPY".equals(rtor.getBucket())) {
+                BigDecimal jpyDelta = rtor.getDelta().multiply(
+                        jpyDirectionFactor.add(
+                                BigDecimal.ONE.subtract(jpyDirectionFactor)
+                                        .divide(jpyRateValue, 10, RoundingMode.HALF_UP)
+                        )
+                );
+                result.add(new TradeDelta(rtor.getTradeId(), "JPY", jpyDelta));
+            }
         }
 
         return result;
     }
 
-    // Helper method to check if a currency is a special currency
     private boolean isSpecialCurrency(String currency) {
         return List.of("AUD", "EUR", "GBP", "CLF", "NZD").contains(currency);
     }
+}
+
+
+
+
+
+
+
+@Repository
+public interface DfsOptionSensitivityRepository extends JpaRepository<DfsOptionSensitivity, Long> {
+    @Query("SELECT r FROM DfsOptionSensitivity r WHERE r.asOfDate = :asOfDate AND r.underlying LIKE :underlyingPattern")
+    List<DfsOptionSensitivity> findByAsOfDateAndUnderlyingPattern(@Param("asOfDate") LocalDate asOfDate, @Param("underlyingPattern") String underlyingPattern);
 }
