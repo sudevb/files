@@ -1,34 +1,21 @@
-private List<TradeDelta> calculateFinalDeltas(List<RtorDto> rtorList, LocalDate asOfDate) {
-    List<TradeDelta> result = new ArrayList<>();
+#!/bin/bash
 
-    // Retrieve FX rates for all relevant buckets
-    Map<String, FxRate> fxRateMap = fxRateRepo.findRates(asOfDate, "USD");
+# Default values
+DEFAULT_AS_OF_DATE=$(date +"%Y-%m-%d")  # Default to today's date
+DEFAULT_COUNT=10                         # Default count value
 
-    // Process the RTOR list
-    for (RtorDto rtor : rtorList) {
-        if ("JPY".equals(rtor.getBucket())) {
-            // Special case for JPY bucket
-            FxRate jpyRate = fxRateMap.get("JPY");
-            if (jpyRate == null) {
-                throw new RuntimeException("FX rate not found for JPY");
-            }
-            BigDecimal adjustedDelta = rtor.getDelta();
-            result.add(new TradeDelta(rtor.getTradeId(), "JPY", adjustedDelta));
-        } else {
-            // Other buckets
-            FxRate fxRate = fxRateMap.get(rtor.getBucket());
-            if (fxRate == null) {
-                throw new RuntimeException("FX rate not found for bucket: " + rtor.getBucket());
-            }
+# Accept arguments or use default values
+AS_OF_DATE=${1:-$DEFAULT_AS_OF_DATE}
+COUNT=${2:-$DEFAULT_COUNT}
 
-            BigDecimal directionFactor = "N".equals(fxRate.getDirection()) ? BigDecimal.ONE : BigDecimal.ZERO;
-            BigDecimal adjustedDelta = rtor.getDelta().multiply(
-                directionFactor.multiply(fxRate.getRate())
-                        .add(BigDecimal.ONE.subtract(directionFactor).divide(fxRate.getRate(), 10, RoundingMode.HALF_UP))
-            );
-            result.add(new TradeDelta(rtor.getTradeId(), rtor.getBucket(), adjustedDelta));
-        }
-    }
+# Define the API endpoint with parameters
+API_URL="https://your-api-endpoint.com/dates?asOfDate=${AS_OF_DATE}&count=${COUNT}"
 
-    return result;
-}
+# Fetch the list of dates from the API
+dates=$(curl -s "$API_URL" | jq -r '.[]')
+
+# Iterate through each date and call dailydataload with the date as the parameter
+for date in $dates; do
+    echo "Processing date: $date"
+    ./dailydataload "$date"
+done
