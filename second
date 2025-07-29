@@ -1,21 +1,63 @@
-#!/bin/bash
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.core.MethodParameter;
+import org.springframework.http.MediaType;
+import org.springframework.http.converter.HttpMessageConverter;
+import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
-# Default values
-DEFAULT_AS_OF_DATE=$(date +"%Y-%m-%d")  # Default to today's date
-DEFAULT_COUNT=10                         # Default count value
+import java.lang.reflect.Field;
+import java.time.LocalDate;
 
-# Accept arguments or use default values
-AS_OF_DATE=${1:-$DEFAULT_AS_OF_DATE}
-COUNT=${2:-$DEFAULT_COUNT}
+@ControllerAdvice
+public class CurrentDateModifierAdvice implements ResponseBodyAdvice<Object> {
 
-# Define the API endpoint with parameters
-API_URL="https://your-api-endpoint.com/dates?asOfDate=${AS_OF_DATE}&count=${COUNT}"
+    @Override
+    public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
+        // This means we apply it to all controller responses
+        return true;
+    }
 
-# Fetch the list of dates from the API
-dates=$(curl -s "$API_URL" | jq -r '.[]')
+    @Override
+    public Object beforeBodyWrite(Object body,
+                                  MethodParameter returnType,
+                                  MediaType selectedContentType,
+                                  Class<? extends HttpMessageConverter<?>> selectedConverterType,
+                                  ServerHttpRequest request,
+                                  ServerHttpResponse response) {
 
-# Iterate through each date and call dailydataload with the date as the parameter
-for date in $dates; do
-    echo "Processing date: $date"
-    ./dailydataload "$date"
-done
+        if (body == null) return null;
+
+        try {
+            Field currentDateField = findCurrentDateField(body);
+            if (currentDateField != null) {
+                currentDateField.setAccessible(true);
+                Object currentValue = currentDateField.get(body);
+
+                if (currentValue instanceof LocalDate) {
+                    LocalDate original = (LocalDate) currentValue;
+                    currentDateField.set(body, original.plusDays(1));
+                }
+            }
+        } catch (Exception e) {
+            // Log it if needed, or silently ignore
+            e.printStackTrace();
+        }
+
+        return body;
+    }
+
+    private Field findCurrentDateField(Object body) {
+        Class<?> clazz = body.getClass();
+        while (clazz != null) {
+            for (Field field : clazz.getDeclaredFields()) {
+                if ("currentDate".equals(field.getName()) && field.getType().equals(LocalDate.class)) {
+                    return field;
+                }
+            }
+            clazz = clazz.getSuperclass(); // in case it's inherited
+        }
+        return null;
+    }
+}
