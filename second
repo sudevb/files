@@ -1,63 +1,58 @@
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.core.MethodParameter;
-import org.springframework.http.MediaType;
-import org.springframework.http.converter.HttpMessageConverter;
-import org.springframework.http.server.ServerHttpRequest;
-import org.springframework.http.server.ServerHttpResponse;
-import org.springframework.web.bind.annotation.ControllerAdvice;
-import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
+import org.springframework.http.server.ServletServerHttpRequest;
+import javax.servlet.http.HttpServletRequest;
 
-import java.lang.reflect.Field;
-import java.time.LocalDate;
+...
 
-@ControllerAdvice
-public class CurrentDateModifierAdvice implements ResponseBodyAdvice<Object> {
+@Override
+public Object beforeBodyWrite(Object body,
+                              MethodParameter returnType,
+                              MediaType selectedContentType,
+                              Class<? extends HttpMessageConverter<?>> selectedConverterType,
+                              ServerHttpRequest request,
+                              ServerHttpResponse response) {
 
-    @Override
-    public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
-        // This means we apply it to all controller responses
-        return true;
+    int offset = 1; // default if offset param is missing or invalid
+
+    // Step 1: Extract 'offset' query param from request
+    if (request instanceof ServletServerHttpRequest servletRequest) {
+        HttpServletRequest httpRequest = servletRequest.getServletRequest();
+        String offsetParam = httpRequest.getParameter("offset");
+
+        if (offsetParam != null) {
+            try {
+                offset = Integer.parseInt(offsetParam);
+            } catch (NumberFormatException e) {
+                System.out.println("Invalid offset parameter: " + offsetParam + ", using default: " + offset);
+            }
+        }
     }
 
-    @Override
-    public Object beforeBodyWrite(Object body,
-                                  MethodParameter returnType,
-                                  MediaType selectedContentType,
-                                  Class<? extends HttpMessageConverter<?>> selectedConverterType,
-                                  ServerHttpRequest request,
-                                  ServerHttpResponse response) {
+    // Step 2: Proceed with previous logic using `offset` instead of hardcoded 1
+    if (body instanceof ResponseDto responseDto) {
+        Object data = responseDto.getData();
 
-        if (body == null) return null;
+        if (data instanceof List<?> dataList) {
+            for (Object item : dataList) {
+                if (item == null) continue;
 
-        try {
-            Field currentDateField = findCurrentDateField(body);
-            if (currentDateField != null) {
-                currentDateField.setAccessible(true);
-                Object currentValue = currentDateField.get(body);
+                try {
+                    Field currentDateField = findCurrentDateField(item);
+                    if (currentDateField != null) {
+                        currentDateField.setAccessible(true);
+                        Object currentValue = currentDateField.get(item);
 
-                if (currentValue instanceof LocalDate) {
-                    LocalDate original = (LocalDate) currentValue;
-                    currentDateField.set(body, original.plusDays(1));
+                        if (currentValue instanceof String dateStr) {
+                            LocalDate parsed = LocalDate.parse(dateStr, ISO_DATE);
+                            String newDateStr = parsed.plusDays(offset).format(ISO_DATE);
+                            currentDateField.set(item, newDateStr);
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
-        } catch (Exception e) {
-            // Log it if needed, or silently ignore
-            e.printStackTrace();
         }
-
-        return body;
     }
 
-    private Field findCurrentDateField(Object body) {
-        Class<?> clazz = body.getClass();
-        while (clazz != null) {
-            for (Field field : clazz.getDeclaredFields()) {
-                if ("currentDate".equals(field.getName()) && field.getType().equals(LocalDate.class)) {
-                    return field;
-                }
-            }
-            clazz = clazz.getSuperclass(); // in case it's inherited
-        }
-        return null;
-    }
+    return body;
 }
