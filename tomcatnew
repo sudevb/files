@@ -34,6 +34,21 @@
 </project>
 
 
+@Controller
+public class SpaController {
+
+    @GetMapping({"/my-ui", "/my-ui/"})
+    public String forwardRoot() {
+        return "forward:/my-ui/index.html";
+    }
+
+    @GetMapping("/my-ui/**")
+    public String forwardPaths() {
+        return "forward:/my-ui/index.html";
+    }
+}
+
+
 
 package com.example.reacthost;
 
