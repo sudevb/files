@@ -1,0 +1,84 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>react-host</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.4</version> <!-- use your Spring Boot version -->
+    </parent>
+
+    <dependencies>
+        <!-- Web + Embedded Tomcat -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+
+
+
+package com.example.reacthost;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+
+package com.example.reacthost;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
+import org.springframework.web.servlet.config.annotation.ViewControllerRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+
+    private static final String REACT_PATH = "/my-ui/**";
+    private static final String REACT_LOCATION = "file:/opt/react-apps/my-ui/"; 
+    // change this to where you copied your React build
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry.addResourceHandler(REACT_PATH)
+                .addResourceLocations(REACT_LOCATION);
+    }
+
+    @Override
+    public void addViewControllers(ViewControllerRegistry registry) {
+        // fallback: if no file is found under /my-ui/, return index.html
+        registry.addViewController("/my-ui/{spring:[\\w\\-]+}")
+                .setViewName("forward:/my-ui/index.html");
+        registry.addViewController("/my-ui/**/{spring:[\\w\\-]+}")
+                .setViewName("forward:/my-ui/index.html");
+    }
+}
+
+
+
+server.port=8443
+server.ssl.enabled=false   # set true if you want SSL
+
