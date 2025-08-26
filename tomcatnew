@@ -35,6 +35,47 @@
 
 
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+import org.springframework.boot.web.servlet.ServletRegistrationBean;
+import org.springframework.context.annotation.Bean;
+
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServlet;
+
+import java.io.IOException;
+
+@Component
+public class SpaFallbackConfig {
+
+    @Bean
+    public ServletRegistrationBean<HttpServlet> spaFallbackServlet() {
+        HttpServlet servlet = new HttpServlet() {
+            @Override
+            protected void service(HttpServletRequest req, HttpServletResponse resp)
+                    throws ServletException, IOException {
+
+                String uri = req.getRequestURI();
+
+                // If request is for a real static file (has a dot), let Tomcat serve it
+                if (uri.contains(".")) {
+                    resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+                    return;
+                }
+
+                // Forward everything else (including query string) to index.html
+                req.getRequestDispatcher("/my-ui/index.html").forward(req, resp);
+            }
+        };
+
+        ServletRegistrationBean<HttpServlet> bean = new ServletRegistrationBean<>(servlet, "/my-ui/*");
+        bean.setName("spaFallback");
+        bean.setLoadOnStartup(1);
+        return bean;
+    }
+}
+
 @Bean
 public WebServerFactoryCustomizer<TomcatServletWebServerFactory> tomcatCustomizer() {
     return factory -> factory.addContextCustomizers(context -> {
