@@ -1,0 +1,39 @@
+package com.example;
+
+import org.apache.catalina.WebResourceRoot;
+import org.apache.catalina.webresources.DirResourceSet;
+import org.apache.catalina.webresources.StandardRoot;
+import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
+import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class ReactStaticConfig {
+
+    @Bean
+    public WebServerFactoryCustomizer<TomcatServletWebServerFactory> tomcatCustomizer() {
+        return factory -> factory.addContextCustomizers(context -> {
+
+            // React apps external directories
+            mountReactApp(context, "/my-ui", "/opt/react-apps/my-ui");
+            mountReactApp(context, "/my-sso-ui", "/opt/react-apps/my-sso-ui");
+            mountReactApp(context, "/my-management-ui", "/opt/react-apps/my-management-ui");
+            mountReactApp(context, "/my-other-ui", "/opt/react-apps/my-other-ui");
+        });
+    }
+
+    private void mountReactApp(org.apache.catalina.Context context, String contextPath, String externalPath) {
+        StandardRoot resources = new StandardRoot(context);
+
+        resources.addPreResources(new DirResourceSet(
+                resources,
+                contextPath,      // mount point
+                externalPath,     // folder with React build
+                "/"
+        ));
+
+        context.addWelcomeFile("index.html"); // default page
+        context.setResources(resources);
+    }
+}
