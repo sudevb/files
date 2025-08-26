@@ -18,6 +18,36 @@ public class MultiUiConfig implements WebMvcConfigurer {
 }
 
 
+package com.example.demo.controller;
+
+import com.example.demo.config.UiProperties;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+
+import java.util.Map;
+
+@Controller
+public class UiForwardController {
+
+    private final UiProperties uiProperties;
+
+    public UiForwardController(UiProperties uiProperties) {
+        this.uiProperties = uiProperties;
+    }
+
+    @RequestMapping({"/{app}", "/{app}/"})
+    public String forwardIndex(@org.springframework.web.bind.annotation.PathVariable String app) {
+        // Only forward if it's one of our configured apps
+        for (String configuredApp : uiProperties.getApps().keySet()) {
+            if (configuredApp.equals(app)) {
+                return "forward:/" + app + "/index.html";
+            }
+        }
+        // otherwise, let Spring handle (could be 404 or another mapping)
+        return "forward:/error";
+    }
+}
+
 
 @ConfigurationProperties(prefix = "ui")
 public class UiProperties {
