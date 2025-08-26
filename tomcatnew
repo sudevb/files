@@ -37,14 +37,23 @@
 @Controller
 public class SpaController {
 
-    @GetMapping({"/my-ui", "/my-ui/"})
-    public String forwardRoot() {
-        return "forward:/my-ui/index.html";
-    }
+    private static final String MY_UI_PATH = "/my-ui/";
 
     @GetMapping("/my-ui/**")
-    public String forwardPaths() {
-        return "forward:/my-ui/index.html";
+    public void forwardIfNotFile(javax.servlet.http.HttpServletRequest request,
+                                 javax.servlet.http.HttpServletResponse response) throws java.io.IOException {
+        String path = request.getRequestURI();
+
+        java.nio.file.Path filePath = java.nio.file.Paths.get("/opt/react-apps/my-ui/", path.replace(MY_UI_PATH, ""));
+        java.io.File file = filePath.toFile();
+
+        if (file.exists() && file.isFile()) {
+            // Static file exists → let ResourceHandler serve it
+            response.sendRedirect(path); // or do nothing, Spring will serve it
+        } else {
+            // Not a real file → forward to index.html
+            request.getRequestDispatcher("/my-ui/index.html").forward(request, response);
+        }
     }
 }
 
