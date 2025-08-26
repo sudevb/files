@@ -34,6 +34,45 @@
 </project>
 
 
+
+@Controller
+public class SpaController {
+
+    private static final String REACT_PREFIX = "/my-ui";
+
+    @GetMapping(REACT_PREFIX + "/**")
+    public void forwardIfNotStatic(HttpServletRequest request,
+                                   HttpServletResponse response) throws ServletException, IOException {
+
+        String path = request.getRequestURI();
+
+        // If request is exactly index.html or any static file (contains dot), serve normally
+        if (path.endsWith("index.html") || path.contains(".")) {
+            // Let ResourceHandler serve the file
+            request.getRequestDispatcher(path).forward(request, response);
+            return;
+        }
+
+        // Otherwise, forward to index.html
+        request.getRequestDispatcher(REACT_PREFIX + "/index.html").forward(request, response);
+    }
+}
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+
+    private static final String REACT_PATH = "/my-ui/**";
+    private static final String REACT_LOCATION = "file:/opt/react-apps/my-ui/";
+
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry.addResourceHandler(REACT_PATH)
+                .addResourceLocations(REACT_LOCATION);
+    }
+}
+
+
+
 @Controller
 public class SpaController {
 
