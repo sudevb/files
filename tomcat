@@ -49,6 +49,17 @@ public class UiForwardController {
 }
 
 
+@Configuration
+public class CorsConfig implements WebMvcConfigurer {
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/**")
+                .allowedOrigins("*")   // or restrict to your frontend host
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
+    }
+}
+
+
 @ConfigurationProperties(prefix = "ui")
 public class UiProperties {
     private Map<String, String> apps = new HashMap<>();
