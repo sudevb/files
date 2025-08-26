@@ -35,6 +35,17 @@
 
 
 
+@Bean
+public WebServerFactoryCustomizer<TomcatServletWebServerFactory> tomcatCustomizer() {
+    return factory -> factory.addContextCustomizers(context -> {
+        String reactPath = "/opt/react-apps/my-ui/";
+        StandardRoot resources = new StandardRoot(context);
+        resources.setDocBase(reactPath);
+        context.setResources(resources);
+        context.addWelcomeFile("index.html"); // default page
+    });
+}
+
 @Controller
 public class SpaController {
 
