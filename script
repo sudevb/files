@@ -1,0 +1,16 @@
+awk '
+/calling/ {
+  split($2,t,":")
+  time=t[1]*3600+t[2]*60+t[3]   # seconds of the day
+  calls[++ci] = time            # push into queue
+}
+/response/ {
+  split($2,t,":")
+  time=t[1]*3600+t[2]*60+t[3]
+  if (ri < ci) {
+    ri++                        # pop from queue
+    gap = time - calls[ri]
+    print "Call at index",ri,"gap:",gap,"seconds"
+  }
+}
+' file.log
