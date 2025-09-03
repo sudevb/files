@@ -1,28 +1,37 @@
-
 awk -F'[: ]' '
-function toMillis(date, hh, mm, ss_ms) {
-  split(ss_ms, sm, ".")
-  sec = sm[1]
-  ms  = sm[2] + 0
-  return mktime(date " " hh " " mm " " sec) * 1000 + ms
+function toSeconds(date, hh, mm, ss) {
+  return mktime(date " " hh " " mm " " ss)
 }
 
 /calling/ {
-  # extract YYYY-MM-DD from filename (2nd dot-delimited part)
   split($1, parts, ".")
   date = parts[2]
 
-  calls[++ci] = toMillis(date, $2, $3, $4)
+  split($4, sm, ".")
+  sec = sm[1]
+
+  # store both time string and epoch
+  calls[++ci,"date"] = date
+  calls[ci,"time"]  = sprintf("%s:%s:%s", $2, $3, sec)
+  calls[ci,"epoch"] = toSeconds(date, $2, $3, sec)
 }
 
 /response/ {
   split($1, parts, ".")
   date = parts[2]
 
+  split($4, sm, ".")
+  sec = sm[1]
+
   if (ri < ci) {
     ri++
-    gap = toMillis(date, $2, $3, $4) - calls[ri]
-    print "Pair",ri,": gap =",gap,"ms"
+    resp_time = sprintf("%s:%s:%s", $2, $3, sec)
+    gap = toSeconds(date, $2, $3, sec) - calls[ri,"epoch"]
+
+    print "Date", calls[ri,"date"], \
+          "| calling at", calls[ri,"time"], \
+          "| response at", resp_time, \
+          "| gap =", gap, "seconds"
   }
 }
 ' file.log
