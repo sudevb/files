@@ -1,16 +1,28 @@
-awk '
-/calling/ {
-  split($2,t,":")
-  time=t[1]*3600+t[2]*60+t[3]   # seconds of the day
-  calls[++ci] = time            # push into queue
+
+awk -F'[: ]' '
+function toMillis(date, hh, mm, ss_ms) {
+  split(ss_ms, sm, ".")
+  sec = sm[1]
+  ms  = sm[2] + 0
+  return mktime(date " " hh " " mm " " sec) * 1000 + ms
 }
+
+/calling/ {
+  # extract YYYY-MM-DD from filename (2nd dot-delimited part)
+  split($1, parts, ".")
+  date = parts[2]
+
+  calls[++ci] = toMillis(date, $2, $3, $4)
+}
+
 /response/ {
-  split($2,t,":")
-  time=t[1]*3600+t[2]*60+t[3]
+  split($1, parts, ".")
+  date = parts[2]
+
   if (ri < ci) {
-    ri++                        # pop from queue
-    gap = time - calls[ri]
-    print "Call at index",ri,"gap:",gap,"seconds"
+    ri++
+    gap = toMillis(date, $2, $3, $4) - calls[ri]
+    print "Pair",ri,": gap =",gap,"ms"
   }
 }
 ' file.log
